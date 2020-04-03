@@ -3,19 +3,19 @@
 ## Overview
 ___
 ### Description
-This tutorial is to show how to deploy [MoCCA-SV snakemake pipeline](https://github.com/NCI-CGR/MoCCA-SV) to the cloud platform. In this demonstration, we first show how to create a SGE cluster at AWS using the AWS ParallelCluster, and then how to deploy the MoCCA-SV pipeline on the SGE cluster.
+This tutorial is to guide you to deploy [MoCCA-SV snakemake pipeline](https://github.com/NCI-CGR/MoCCA-SV) to AWS. We first demonstrate how to launch a SGE HPC cluster at AWS using AWS ParallelCluster, and then how to deploy the MoCCA-SV pipeline on the SGE cluster.
 
 ### Dependencies
-In this tutorial, you need have admin permission in your AWS account. You should have basic AWS knowledge to configure VPC, safety gorup, EC2 instance, EFS and etc.
+In this tutorial, you need have admin permission in your AWS account. You should have basic AWS knowledge in configuring VPC, safety group, EC2 instance, EFS and etc.
  
 ### Architecture
-We are going to launch a login node first and create an EFS first.  After installing essential components on EFS, we then create a SGE cluster from the login node, with one master node and two worker nodes.  Finally, remotely access the master node to run the pipeline.    
+We are going to launch a ***login node*** first and create an ***EFS*** first.  After installing essential components required by the pipeline on EFS, we then create a SGE cluster from the login node, consisting of one ***master node*** and two ***worker nodes***.  Finally, remotely access the master node to run the pipeline.    
 
 ___
 
 ## Instructions
-### 1. Launch an EC2 instance as the login node and install pcluster. 
-There is no specific requirement for the EC2 instance to install AWS ParallelCluster later. In our case, we launch an EC2 t2.mciro instance (amzn2-ami-hvm-2.0.20200304.0-x86_64-gp2: ami-0fc61db8544a617ed) as the login node and we follow [this AWS instruction](https://docs.aws.amazon.com/parallelcluster/latest/ug/install-virtualenv.html) to install AWS ParallelCluster in a virtual environment, under the directory ***~/apc-ve***.
+### 1. Launch an EC2 instance as the login node and install AWS ParallelCluster. 
+Most EC2 instances can be used to install AWS ParallelCluster. In our case, we launch an EC2 *t2.mciro* instance (amzn2-ami-hvm-2.0.20200304.0-x86_64-gp2: ami-0fc61db8544a617ed) as the login node, and we follow [this AWS instruction](https://docs.aws.amazon.com/parallelcluster/latest/ug/install-virtualenv.html) to install AWS ParallelCluster in a virtual environment, under the directory ***~/apc-ve***.
 
 After you have done with the AWS ParallelCluster installation, you may confirm your success as below.
 ```bash
@@ -26,19 +26,19 @@ pcluster version
 ```
 
 ### 2. Create an EFS
-It is simple to create a new EFS. You may also choose to use the existing EFS instead.  Please make sure to add rule to the safety group, so as to open NFS port 2049 to allow inbound traffic from the login node and the SGE cluster to the EFS.  The details is available [here](https://docs.aws.amazon.com/efs/latest/ug/accessing-fs-create-security-groups.html).  
+It is simple to create a new EFS, and it is also fine to use an existing EFS instead.  Please make sure to add rule to the safety group, so as to open NFS port 2049 to allow inbound traffic from the login node and the SGE cluster to the EFS.  The detailed instruction is described [here](https://docs.aws.amazon.com/efs/latest/ug/accessing-fs-create-security-groups.html).  
 
 You may test to mount the EFS storage to your login node to /efs: 
 ```bash
 sudo mkdir /efs
 mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=30,retrans=2,noresvport,_netdev fs-XXXXXXXX.efs.us-east-1.amazonaws.com:/ /efs 
 ```
-And move to the next step when the EFS mounting is successful. 
+And move to the next step if your EFS mounting is successful. 
 
 ### 3. Pre-install MoCCA-SV dependencies to /efs
-[Python, snakemake, perl and singularity](https://github.com/NCI-CGR/MoCCA-SV#ii--dependencies) are all reqired to run MoCCA-SV.  We need have them installed in the SGE cluster.  There are several way to achieve it.  One way is [Building a Custom AWS ParallelCluster AMI](https://docs.aws.amazon.com/parallelcluster/latest/ug/tutorials_02_ami_customization.html), which, however, is not ideal as updating is a common scenario in AWS. The preferred way is to [use post-install actions](https://docs.aws.amazon.com/parallelcluster/latest/ug/pre_post_install.html) called after cluster boostrap is complete. We are going to take the preferred way in this tutorial.  
+[Python, snakemake, perl and singularity](https://github.com/NCI-CGR/MoCCA-SV#ii--dependencies) are  required to run MoCCA-SV.  We need have them installed in the SGE cluster to be launched, including both the master node and the worker nodes.  There are several way to achieve it.  One way is [Building a Custom AWS ParallelCluster AMI](https://docs.aws.amazon.com/parallelcluster/latest/ug/tutorials_02_ami_customization.html), which, however, is not ideal as updating is a common scenario in AWS. The preferred way is to [use post-install actions](https://docs.aws.amazon.com/parallelcluster/latest/ug/pre_post_install.html) called after cluster bootstrap is complete. We are going to take the preferred way in this tutorial, with a little modification.  
 
-To save time, we pre-install some of the required modules to /efs via conda. Briefly, we are going to install conda under /efs/miniconda3 and activate the conda installation in the boostrap script later. In this way, it also saves disk space in the master/worker nodes.  
+To save time, we pre-install some of the required modules to /efs via conda. Briefly, we are going to install conda under /efs/miniconda3 and activate the conda installation in the bootstrap script later. In this way, it also saves disk space in the master/worker nodes.  
 
 ```bash
 mkdir -p /efs/dn
@@ -92,9 +92,14 @@ perl --version
 # Complete documentation for Perl, including FAQ lists, should be found on
 # this system using "man perl" or "perldoc perl".  If you have access to the
 # Internet, point your browser at http://www.perl.org/, the Perl Home Page.
+
+
+### Check the spaced used by the conda installation
+du -hs /efs/miniconda3/
+# 4.0G    /efs/miniconda3/
 ```
 
-We found that the singularity version installed by conda cannot work well with the snakemake pipeline. So we put its installation in the bootstrap script, as described in the section below. 
+We noticed that the singularity version installed by conda cannot work well with the snakemake pipeline. So we put its installation in the bootstrap script, as described in the section below. 
 
 ### 4. Install MoCCA-SV pipeline
 The details of the MoCCA-SV pipeline is available at [github](https://github.com/NCI-CGR/MoCCA-SV). 
@@ -103,8 +108,8 @@ cd /efs
 git clone https://github.com/NCI-CGR/MoCCA-SV.git
 ```
 
-### 5. Create the bootstrap script
-This script is to activate conda and install signualrity in the AWS ParallelCluster bootstrap actions. 
+### 5. Create the bootstrap script *install_mocca_dep.sh*
+This script is to activate conda for the default user and also to install singularity. 
 
 ***install_mocca_dep.sh***
 ```bash
@@ -128,15 +133,15 @@ sudo yum update -y && \
 #### end of the script ####
 ```
 
-It is noticable that activation of the conda in the script is a little tricky.  As the script will be run as the user *root* in the bootstrap, and we want to activate the conda setting for the default user *centos*. So we cannot directly run:
+There is a small trick in the activation of the conda in this script.  As the script will be run as the user *root* in the bootstrap process, and what we want is to activate the conda setting for the default user *centos*. So we cannot directly run:
 
 */efs/miniconda3/bin/conda init && source ~/.bashrc*
 
-but run the command below instead in the script: 
+but execute the command below instead in the script: 
 
 */bin/su -c "/efs/miniconda3/bin/conda init && source ~/.bashrc" - ***centos****
 
-Besides, if you use different EC2 instance, you may change default user name, such as, *ec2-user* or *ubuntu*, accordingly in the script. 
+Besides, if you use EC2 AMIs other than CentOS, you may change default user name accordingly, such as, *ec2-user* or *ubuntu*, in the script. 
 
 Finally, we need upload the script to S3. The script at S3 will be specified in the ParallelCluster configure file later. 
 ```bash
@@ -144,8 +149,9 @@ aws s3 cp --acl public-read /efs/scripts/install_mocca_dep.sh s3://mocca-cluster
 ```
 
 ### 6. Configure the SGE cluster
-The most critial step is in this step: cluster configuration.     
+The most critical step is cluster configuration.  You may follow [this instruction](https://docs.aws.amazon.com/parallelcluster/latest/ug/getting-started-configuring-parallelcluster.html) to have a basic configure file under ~/.parallelcluster/.    
 
+You may further edit the file ***~/.parallelcluster/config*** as below.
 ```ini
 [aws]
 aws_region_name = us-east-1
@@ -183,7 +189,7 @@ shared_dir = efs
 efs_fs_id = fs-xxxxxxxx # your efs id
 ```
 
-In this configuration, I have also added [NICE DCV](https://aws.amazon.com/hpc/dcv/) function to the cluster.  NICE DCV provides a remote-descktop like feature to access the master node of the SGE cluster, which is really ***NICE***.  
+In this configuration, I have also added [NICE DCV](https://aws.amazon.com/hpc/dcv/) function to the cluster.  NICE DCV provides a remote-desktop like feature to access the master node of the SGE cluster, which is really ***NICE*** :+1::+1::+1:. 
 
 ### 7. Launch the SGE cluster
 After the configuration is completed, it is very simple to launch the cluster.
@@ -200,25 +206,34 @@ pcluster create hpc-dcv
 
 It takes about 25 minutes to complete the cluster creation. 
 
-Run "pcluster dcv connect hpc-dcv -k ~/.ssh/your-keypair.pem" to use DCV connect to the master node of the new cluster.   You will have a URL link to follow, ignoring the warning messages to proceed. 
+Run 
+```bash
+pcluster dcv connect hpc-dcv -k ~/.ssh/your-keypair.pem
+``` 
+to use DCV connect to the master node of the new cluster.   You will obtain a URL link to follow (ignoring the warning messages). 
 
 
-At the master node, test to confirm:
-+  Python, snakemake, perl and singularity have already been installed as expected.
-+  The SGE cluster is ready to use: try *qhost*
+At the master node, you may try to confirm:
++  Python, snakemake, perl and singularity have already been installed as expected (see the figure below).
+   +  Use "which" command
+   +  Check the version 
++  The SGE cluster is ready to use: try *qhost* (see the figure below).
+
 ![](./img/README_2020-04-02-16-27-26.png)
+     
 
 
-Below is a snaphsot of NICE DCV in use. 
+Below is a snapshot of NICE DCV: IGV is being used on the master node. 
 ![](./img/04.AWS_Cluster_Test1_2020-03-21-19-30-29.png)
 
 
 ### 8. Launch MoCCA-SV pipeline
 We assume that you have followed [the instructions](https://github.com/NCI-CGR/MoCCA-SV) to prepare the input data, reference genome and configuration.   
 
-There is one minor change to be made, as a newer version of snakemake is used here:
+There is one minor change to be made, as a newer version of snakemake is being used here:
 + Insert the command line option ***' --core 4 '*** in the snakemake commands in /efs/MoCCA-SV/SV_wrapper.sh.
-  
+
+For example, 
 ```bash
 cmd=""
 if [ "$clusterMode" == '"'"local"'"' ]; then
@@ -233,21 +248,21 @@ else
 fi
 ```
 
-### Clean up
-It is a good practice to clean up the work space after the project is completed. There are several things you may do:
+### 9. Clean up
+As a last step, it is a good practice to clean up the work space after the project is completed. There are several things you may take care:
 + Clean up the EFS space. In particular, remove the intermediate results, such as, .snakemake folders. 
-+ Move the results to S3 folders.  
++ Move the essential results to S3 folders.  
 + Delete the cluster. 
 
 ___
 ## Tips for trouble-shooting
-It is unavoidable that you may run into some problems, no matter how good a tutorial is. :)
+It is unavoidable that you may run into some problems, no matter how good a tutorial is. It is always good to master trouble-shooting. :) 
 
 Here we have some tips for you:
 + Try to confirm your success in every step. 
 + Create the AWS ParallelCluster with *--norollback* option if there is something wrong in the bootstrapping.
-  + Check the file ~/.parallelcluster/pcluster-cli.log at the login node.
-  + ssh access to the master node and check the log files:
+  + Check the file ~/.parallelcluster/pcluster-cli.log at the **login node**.
+  + ssh access to the **master node** and check the log files:
     + /var/log/cfn-init.log
     + /var/log/cloud-init.log
   
@@ -257,9 +272,9 @@ pcluster create hpc --norollback
 ```
 ___
 ## Summary
-+ AWS ParalleclCluster is a great solution to launch a scalable HPC in the cloud. 
++ AWS ParallelCluster is a great tool to launch a scalable HPC in the cloud. 
   + In particular, I like the integration of EFS and NICE DCV in the cluster configuration. 
-  + AWS ParalleclCluster not only support SGE (by default) but also support other schedulers, including AWS batch, slurm and torque. 
+  + AWS ParallelCluster not only supports SGE (by default) but also supports other schedulers, including AWS batch, slurm and torque. 
 + However, AWS ParallelCluster is not as a multi-platform HPC solution as [ElastiCluster](https://elasticluster.readthedocs.io/en/latest/).
-+ Snakemake works with the SGE clsuter created by AWS ParallelCluster as well as the on-premise SGE cluster. 
++ Snakemake works with the SGE cluster created by AWS ParallelCluster as well as the on-premise SGE cluster. 
 
