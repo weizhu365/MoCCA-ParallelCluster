@@ -111,7 +111,7 @@ git clone https://github.com/NCI-CGR/MoCCA-SV.git
 ### 5. Create the bootstrap script *install_mocca_dep.sh*
 This script is to activate conda for the default user and also to install singularity. 
 
-***install_mocca_dep.sh***
+[install_mocca_dep.sh](./install_mocca_dep.sh)
 ```bash
 #!/bin/bash
 
